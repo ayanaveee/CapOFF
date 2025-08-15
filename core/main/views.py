@@ -1,16 +1,51 @@
 from django.db.models import Q, Count
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from .models import Product, Banner
+from .models import Product, ProductImage, Banner, Size, Storage
 from .serializers import ProductListSerializer, BannerListSerializer
+from rest_framework import serializers
 
-#class IndexView(APIView):
-    #def get(self, request):
-        #products = Product.objects.all()
-        #serializer = ProductListSerializer(products, many=True)
 
-        #return Response(serializer.data)
+class ProductImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductImage
+        fields = ['file']
+
+
+class ProductDetailSerializer(serializers.ModelSerializer):
+    sizes = serializers.SerializerMethodField()
+    images = serializers.SerializerMethodField()
+    recommended_products = serializers.SerializerMethodField()
+    category = serializers.StringRelatedField()
+    brands = serializers.StringRelatedField(many=True)
+
+    class Meta:
+        model = Product
+        fields = [
+            'id', 'title', 'category', 'brands', 'description',
+            'cover', 'images', 'sizes', 'new_price', 'old_price',
+            'recommended_products'
+        ]
+
+    def get_sizes(self, obj):
+        sizes = Size.objects.all()
+        result = {}
+        for size in sizes:
+            storage = Storage.objects.filter(product=obj, size=size, quantity__gte=1).exists()
+            if storage:
+                result[size.title] = {"id": size.id}
+        return result
+
+    def get_images(self, obj):
+        images = ProductImage.objects.filter(product=obj)
+        return ProductImageSerializer(images, many=True).data
+
+    def get_recommended_products(self, obj):
+        products = Product.objects.filter(category=obj.category).exclude(id=obj.id)[:4]
+        return ProductListSerializer(products, many=True).data
+
+
 
 class IndexView(APIView):
     def get(self, request):
@@ -19,17 +54,13 @@ class IndexView(APIView):
         best_seller_products = Product.objects.all()[:4]
         discounted_products = Product.objects.filter(new_price__isnull=False)[:4]
 
-        popular_brands_serializer = BannerListSerializer(popular_brands, many=True)
-        best_seller_products_serializer = ProductListSerializer(best_seller_products, many=True)
-        discounted_products_serializer = ProductListSerializer(discounted_products, many=True)
-        index_banner_serializer = BannerListSerializer(index_banner, many=True)
-
         return Response({
-            "index_banner": index_banner_serializer.data,
-            "popular_brands": popular_brands_serializer.data,
-            "best_seller_products": best_seller_products_serializer.data,
-            "discounted_products": discounted_products_serializer.data
+            "index_banner": BannerListSerializer(index_banner, many=True).data,
+            "popular_brands": BannerListSerializer(popular_brands, many=True).data,
+            "best_seller_products": ProductListSerializer(best_seller_products, many=True).data,
+            "discounted_products": ProductListSerializer(discounted_products, many=True).data
         })
+
 
 class ProductCatalogView(APIView):
     def get(self, request):
@@ -38,7 +69,6 @@ class ProductCatalogView(APIView):
         brand_id = request.GET.get('brand')
 
         catalog_banner = Banner.objects.filter(location='catalog_head')
-
         products = Product.objects.all()
 
         if category_id:
@@ -61,3 +91,10 @@ class ProductCatalogView(APIView):
             "catalog_banner": BannerListSerializer(catalog_banner, many=True).data,
             "products_catalog": ProductListSerializer(products, many=True).data
         })
+
+
+class ProductDetailView(APIView):
+    def get(self, request, product_id):
+        product = get_object_or_404(Product, id=product_id)
+        serializer = ProductDetailSerializer(product)
+        return Response(serializer.data)

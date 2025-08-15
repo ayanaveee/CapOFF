@@ -1,5 +1,8 @@
 from django.db import models
 from .choices import *
+from django.contrib.auth import get_user_model
+
+MyUser = get_user_model()
 
 
 class Category(models.Model):
@@ -57,7 +60,7 @@ class ProductImage(models.Model):
 
 
 class Basket(models.Model):
-    #user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="baskets")
+    user = models.ForeignKey(MyUser, on_delete=models.CASCADE, related_name="baskets")
     total_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     class Meta:
@@ -122,7 +125,7 @@ class BasketItems(models.Model):
 
 
 class Order(models.Model):
-    #user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="orders")
+    user = models.ForeignKey(MyUser, on_delete=models.CASCADE, related_name="orders")
     total_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     update_at = models.DateTimeField(auto_now=True)
@@ -150,7 +153,7 @@ class OrderItems(models.Model):
 
 
 class Favorite(models.Model):
-    #user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="favorites")
+    user = models.ForeignKey(MyUser, on_delete=models.CASCADE, related_name="favorites")
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="favorited_by")
 
     class Meta:
