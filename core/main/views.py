@@ -1,10 +1,13 @@
 from django.db.models import Q, Count
 from django.shortcuts import get_object_or_404
+from rest_framework.exceptions import ValidationError
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from .models import Product, ProductImage, Banner, Size, Storage
+from .models import Product, ProductImage, Favorite, Banner, Size, Storage, Basket
 from .serializers import ProductListSerializer, BannerListSerializer, BasketItemsCreateSerializer
-from rest_framework import serializers, status
+from rest_framework import serializers, status, permissions
+from .services import add_to_basket
+from .serializers import FavoriteSerializer
 
 
 class ProductImageSerializer(serializers.ModelSerializer):
@@ -109,3 +112,56 @@ class BasketItemsCreateView(APIView):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class AddToBasketView(APIView):
+    def post(self, request, storage_id):
+        user_basket, _ = Basket.objects.get_or_create(user=request.user)
+        storage = get_object_or_404(Storage, id=storage_id)
+        quantity = int(request.data.get("quantity", 1))
+
+        try:
+            add_to_basket(user_basket, storage, quantity)
+        except ValidationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({"message": "Товар добавлен в корзину"})
+
+class FavoriteListView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        favorites = Favorite.objects.filter(user=user)
+        serializer = FavoriteSerializer(favorites, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class AddToFavoriteView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, product_id):
+        user = request.user
+        try:
+            product = Product.objects.get(id=product_id)
+        except Product.DoesNotExist:
+            return Response({"detail": "Товар не найден"}, status=status.HTTP_404_NOT_FOUND)
+
+        favorite, created = Favorite.objects.get_or_create(user=user, product=product)
+        if not created:
+            return Response({"detail": "Товар уже в избранном"}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = FavoriteSerializer(favorite)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class RemoveFromFavoriteView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request, product_id):
+        user = request.user
+        try:
+            favorite = Favorite.objects.get(user=user, product_id=product_id)
+            favorite.delete()
+            return Response({"detail": "Товар удалён из избранного"}, status=status.HTTP_204_NO_CONTENT)
+        except Favorite.DoesNotExist:
+            return Response({"detail": "Товар не найден в избранном"}, status=status.HTTP_404_NOT_FOUND)

@@ -63,6 +63,10 @@ class Basket(models.Model):
     user = models.ForeignKey(MyUser, on_delete=models.CASCADE, related_name="baskets")
     total_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
+    def update_total(self):
+        self.total_price = sum(item.quantity * item.storage.product.new_price for item in self.items.all())
+        self.save()
+        
     class Meta:
         verbose_name = "Корзина"
         verbose_name_plural = "Корзины"

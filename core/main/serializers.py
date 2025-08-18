@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Product, Category, Brand, Banner, Size, Storage, ProductImage, BasketItems, Basket
+from .models import Product, Category, Brand, Favorite, Banner, Size, Storage, ProductImage, BasketItems, Basket
 
 
 class CategoryListSerializer(serializers.ModelSerializer):
@@ -79,3 +79,17 @@ class BasketItemsCreateSerializer(serializers.ModelSerializer):
         basket_items = BasketItems.objects.create(basket=basket, storage_product=storage_product, quantity=validated_data['quantity'])
 
         return basket_items
+
+
+
+class ProductSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Product
+        fields = ['id', 'title', 'cover', 'new_price']
+
+class FavoriteSerializer(serializers.ModelSerializer):
+    product = ProductSerializer(read_only=True)
+
+    class Meta:
+        model = Favorite
+        fields = ['id', 'product']
