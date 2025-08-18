@@ -68,7 +68,7 @@ class Basket(models.Model):
         verbose_name_plural = "Корзины"
 
     def __str__(self):
-        return f"Корзина #{self.id}"
+        return f"{self.user}"
 
 
 class Banner(models.Model):

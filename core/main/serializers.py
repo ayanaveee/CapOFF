@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Product, Category, Brand, Banner, Size, Storage, ProductImage
+from .models import Product, Category, Brand, Banner, Size, Storage, ProductImage, BasketItems, Basket
 
 
 class CategoryListSerializer(serializers.ModelSerializer):
@@ -62,3 +62,20 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     def get_recommended_products(self, obj):
         products = Product.objects.filter(category=obj.category).exclude(id=obj.id)[:4]
         return ProductListSerializer(products, many=True).data
+
+class BasketItemsCreateSerializer(serializers.ModelSerializer):
+    product_id = serializers.IntegerField(write_only=True)
+    size_id = serializers.IntegerField(write_only=True)
+    quantity = serializers.IntegerField()
+    total_price = serializers.IntegerField(write_only=True)
+
+    def create(self, validated_data):
+        basket,_ = Basket.objects.get_or_create(user=self.context['request'].user)
+        product = Product.objects.filter(id=validated_data['product_id']).first()
+        size = Size.objects.filter(id=validated_data['size_id']).first()
+
+        storage_product = Storage.objects.filter(product=product, size=size).first()
+
+        basket_items = BasketItems.objects.create(basket=basket, storage_product=storage_product, quantity=validated_data['quantity'])
+
+        return basket_items

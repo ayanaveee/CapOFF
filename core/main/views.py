@@ -3,8 +3,8 @@ from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from .models import Product, ProductImage, Banner, Size, Storage
-from .serializers import ProductListSerializer, BannerListSerializer
-from rest_framework import serializers
+from .serializers import ProductListSerializer, BannerListSerializer, BasketItemsCreateSerializer
+from rest_framework import serializers, status
 
 
 class ProductImageSerializer(serializers.ModelSerializer):
@@ -98,3 +98,14 @@ class ProductDetailView(APIView):
         product = get_object_or_404(Product, id=product_id)
         serializer = ProductDetailSerializer(product)
         return Response(serializer.data)
+
+
+class BasketItemsCreateView(APIView):
+    def post(self, request):
+        serializer = BasketItemsCreateSerializer(data=request.data)
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
