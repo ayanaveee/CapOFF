@@ -1,53 +1,23 @@
 from django.db.models import Q, Count
 from django.shortcuts import get_object_or_404
-from rest_framework.exceptions import ValidationError
 from rest_framework.views import APIView
+from rest_framework import generics, permissions
 from rest_framework.response import Response
-from .models import Product, ProductImage, Favorite, Banner, Size, Storage, Basket
-from .serializers import ProductListSerializer, BannerListSerializer, BasketItemsCreateSerializer
-from rest_framework import serializers, status, permissions
-from .services import add_to_basket
-from .serializers import FavoriteSerializer
-
-
-class ProductImageSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ProductImage
-        fields = ['file']
-
-
-class ProductDetailSerializer(serializers.ModelSerializer):
-    sizes = serializers.SerializerMethodField()
-    images = serializers.SerializerMethodField()
-    recommended_products = serializers.SerializerMethodField()
-    category = serializers.StringRelatedField()
-    brands = serializers.StringRelatedField(many=True)
-
-    class Meta:
-        model = Product
-        fields = [
-            'id', 'title', 'category', 'brands', 'description',
-            'cover', 'images', 'sizes', 'new_price', 'old_price',
-            'recommended_products'
-        ]
-
-    def get_sizes(self, obj):
-        sizes = Size.objects.all()
-        result = {}
-        for size in sizes:
-            storage = Storage.objects.filter(product=obj, size=size, quantity__gte=1).exists()
-            if storage:
-                result[size.title] = {"id": size.id}
-        return result
-
-    def get_images(self, obj):
-        images = ProductImage.objects.filter(product=obj)
-        return ProductImageSerializer(images, many=True).data
-
-    def get_recommended_products(self, obj):
-        products = Product.objects.filter(category=obj.category).exclude(id=obj.id)[:4]
-        return ProductListSerializer(products, many=True).data
-
+from rest_framework import status
+from django_filters.rest_framework import DjangoFilterBackend
+from django_filters import rest_framework as filters
+from.filters import ProductFilter
+from .models import Product, Favorite, Banner, Storage, Basket, BasketItems, Order, OrderItems
+from .serializers import (
+    ProductListSerializer,
+    BannerListSerializer,
+    ProductDetailSerializer,
+    BasketItemsCreateSerializer,
+    BasketItemsSerializer,
+    FavoriteSerializer,
+    CheckoutSerializer,
+    OrderSerializer
+)
 
 
 class IndexView(APIView):
@@ -65,34 +35,27 @@ class IndexView(APIView):
         })
 
 
-class ProductCatalogView(APIView):
-    def get(self, request):
-        sort = request.GET.get('sort')
-        category_id = request.GET.get('category')
-        brand_id = request.GET.get('brand')
+from rest_framework import generics
+from django_filters.rest_framework import DjangoFilterBackend
+from .models import Product, Banner
+from .serializers import ProductListSerializer, BannerListSerializer
+from .filters import ProductFilter
 
+
+class ProductCatalogView(generics.ListAPIView):
+    queryset = Product.objects.all()
+    serializer_class = ProductListSerializer
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = ProductFilter
+
+    def list(self, request, *args, **kwargs):
         catalog_banner = Banner.objects.filter(location='catalog_head')
-        products = Product.objects.all()
 
-        if category_id:
-            products = products.filter(category_id=category_id)
-        if brand_id:
-            products = products.filter(brands__id=brand_id)
-
-        if sort == 'popular':
-            products = products.annotate(
-                orders_count=Count('storages__orderitems', distinct=True)
-            ).order_by('-orders_count', '-id')
-        elif sort == 'new':
-            products = products.order_by('-created_at')
-        elif sort == 'cheap':
-            products = products.order_by('new_price', 'old_price')
-        elif sort == 'expensive':
-            products = products.order_by('-new_price', '-old_price')
+        filtered_products = self.filter_queryset(self.get_queryset())
 
         return Response({
             "catalog_banner": BannerListSerializer(catalog_banner, many=True).data,
-            "products_catalog": ProductListSerializer(products, many=True).data
+            "products_catalog": ProductListSerializer(filtered_products, many=True).data
         })
 
 
@@ -105,40 +68,21 @@ class ProductDetailView(APIView):
 
 class BasketItemsCreateView(APIView):
     def post(self, request):
-        serializer = BasketItemsCreateSerializer(data=request.data)
-
+        serializer = BasketItemsCreateSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-
+            basket_item = serializer.save()
+            return Response(BasketItemsSerializer(basket_item).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-class AddToBasketView(APIView):
-    def post(self, request, storage_id):
-        user_basket, _ = Basket.objects.get_or_create(user=request.user)
-        storage = get_object_or_404(Storage, id=storage_id)
-        quantity = int(request.data.get("quantity", 1))
-
-        try:
-            add_to_basket(user_basket, storage, quantity)
-        except ValidationError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response({"message": "Товар добавлен в корзину"})
 
 class FavoriteListView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
     def get(self, request):
-        user = request.user
-        favorites = Favorite.objects.filter(user=user)
+        favorites = Favorite.objects.filter(user=request.user)
         serializer = FavoriteSerializer(favorites, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class AddToFavoriteView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
     def post(self, request, product_id):
         user = request.user
         try:
@@ -155,8 +99,6 @@ class AddToFavoriteView(APIView):
 
 
 class RemoveFromFavoriteView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
     def delete(self, request, product_id):
         user = request.user
         try:
@@ -165,3 +107,47 @@ class RemoveFromFavoriteView(APIView):
             return Response({"detail": "Товар удалён из избранного"}, status=status.HTTP_204_NO_CONTENT)
         except Favorite.DoesNotExist:
             return Response({"detail": "Товар не найден в избранном"}, status=status.HTTP_404_NOT_FOUND)
+
+
+class CheckoutAPIView(generics.GenericAPIView):
+    serializer_class = CheckoutSerializer
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        basket_id = serializer.validated_data['basket_id']
+        basket = Basket.objects.get(id=basket_id, user=request.user)
+
+        order = Order.objects.create(
+            user=request.user,
+            total_price=basket.total_price,
+            status="Создан"
+        )
+
+        for item in basket.items.all():
+            OrderItems.objects.create(
+                order=order,
+                storage=item.storage,
+                quantity=item.quantity)
+
+        basket.items.all().delete()
+        basket.update_total()
+
+        return Response({"detail": f"Заказ #{order.id} создан успешно."}, status=status.HTTP_201_CREATED)
+
+
+class OrderListAPIView(generics.ListAPIView):
+    serializer_class = OrderSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Order.objects.filter(user=self.request.user).order_by('-created_at')
+
+class OrderDetailAPIView(generics.RetrieveAPIView):
+    serializer_class = OrderSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    lookup_field = 'id'
+
+    def get_queryset(self):
+        return Order.objects.filter(user=self.request.user)
